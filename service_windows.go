@@ -21,6 +21,11 @@ import (
 
 const version = "windows-service"
 
+type windowsInterface interface {
+	Interface
+	PowerEvent(status svc.ChangeRequest) error
+}
+
 type windowsService struct {
 	i Interface
 	*Config
@@ -161,7 +166,7 @@ func (ws *windowsService) getError() error {
 }
 
 func (ws *windowsService) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
-	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown
+	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPowerEvent
 	changes <- svc.Status{State: svc.StartPending}
 
 	if err := ws.i.Start(ws); err != nil {
@@ -183,6 +188,15 @@ loop:
 				return true, 2
 			}
 			break loop
+		case svc.PowerEvent:
+			// If the extra interface member(s) from WindowsInterface are present on the provided object
+			if wi, isWindowsInterface := ws.i.(windowsInterface); isWindowsInterface {
+				if err := wi.PowerEvent(c); err != nil {
+					ws.setError(err)
+					return true, 3
+				}
+				changes <- svc.Status{State: svc.ContinuePending}
+			}
 		default:
 			continue loop
 		}
